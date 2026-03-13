@@ -177,7 +177,7 @@ async def faq_connect_answer(callback: CallbackQuery):
 
 @router.message(F.text == "🌐 Статус сервера")
 async def server_status(message: Message):
-    wait_msg = await message.answer("🔄 <i>Опрашиваю сервер...</i>", parse_mode="HTML")
+    wait_msg = await message.answer("🔄 <i>Проверяю сервер...</i>", parse_mode="HTML")
     try:
         server = await JavaServer.async_lookup(SERVER_IP)
         status = await server.async_status()
