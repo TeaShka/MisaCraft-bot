@@ -158,7 +158,28 @@ class AdminStates(StatesGroup):
 # ==========================================
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, bot: Bot):
+    # Проверка 2: Побег из тикета
+    current_state = await state.get_state()
+    if current_state in [SupportStates.waiting_for_question.state, SupportStates.in_ticket.state]:
+        if current_state == SupportStates.in_ticket.state:
+            player_data = await state.get_data()
+            mod_id = player_data.get("mod_id")
+            ticket_msg_id = player_data.get("ticket_msg_id")
+            
+            target_id = mod_id if mod_id else MOD_GROUP_ID
+            thread_id = None if mod_id else MOD_THREAD_ID
+            
+            # Убираем кнопку из группы модераторов
+            if ticket_msg_id and not mod_id:
+                try:
+                    await bot.edit_message_reply_markup(chat_id=target_id, message_id=ticket_msg_id, reply_markup=None)
+                except: pass
+            
+            try:
+                await bot.send_message(chat_id=target_id, message_thread_id=thread_id, text=f"⚠️ Игрок <code>{message.from_user.id}</code> покинул обращение (вернулся в меню).", parse_mode="HTML")
+            except: pass
+
     await state.clear()
     add_user(message.from_user.id)
     
@@ -311,8 +332,17 @@ async def close_ticket_user(message: Message, state: FSMContext, bot: Bot):
     if current_state == SupportStates.in_ticket.state:
         player_data = await state.get_data()
         mod_id = player_data.get("mod_id")
+        ticket_msg_id = player_data.get("ticket_msg_id")
+        
         target_id = mod_id if mod_id else MOD_GROUP_ID
         thread_id = None if mod_id else MOD_THREAD_ID
+
+        # Проверка 3: Убираем призрачную кнопку "Взять обращение"
+        if ticket_msg_id and not mod_id:
+            try:
+                await bot.edit_message_reply_markup(chat_id=target_id, message_id=ticket_msg_id, reply_markup=None)
+            except Exception:
+                pass
 
         await state.clear()
         await message.answer("✅ <b>Обращение закрыто.</b>\n\nЕсли появятся новые вопросы - смело пиши снова!", reply_markup=main_kb, parse_mode="HTML")
@@ -323,8 +353,8 @@ async def close_ticket_user(message: Message, state: FSMContext, bot: Bot):
     else:
         await message.answer("У вас нет активных обращений.", reply_markup=main_kb)
 
-@router.message(SupportStates.waiting_for_question, F.text | F.photo)
-async def process_support_question(message: Message, state: FSMContext):
+@router.message(SupportStates.waiting_for_question)
+async def process_support_question(message: Message, state: FSMContext, bot: Bot):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Без юзернейма"
     
@@ -334,56 +364,47 @@ async def process_support_question(message: Message, state: FSMContext):
     await message.answer(
         "✅ <b>Обращение успешно создано!</b>\n\n"
         "Администрация уже получила твое сообщение. Обычно мы отвечаем в течение дня.\n"
-        "Ты можешь присылать сюда дополнительные детали или скриншоты, пока диалог открыт.",
+        "Ты можешь присылать сюда детали, скриншоты, голосовые или видео, пока диалог открыт.",
         reply_markup=in_ticket_kb,
         parse_mode="HTML"
     )
     await state.set_state(SupportStates.in_ticket)
-    await state.update_data(mod_id=None)
     
-    text_content = message.text or message.caption or "<Только фото>"
     safe_name = html.escape(message.from_user.full_name)
-    safe_text = html.escape(text_content)
     
-    admin_text = (
+    header_text = (
         f"🚨 <b>Новый тикет поддержки</b>\n\n"
         f"👤 <b>Пользователь:</b> {safe_name} ({username})\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-        f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"{safe_text}"
+        f"➖➖➖➖➖➖➖➖➖➖"
     )
     try:
-        if message.photo:
-            await bot.send_photo(chat_id=MOD_GROUP_ID, message_thread_id=MOD_THREAD_ID, photo=message.photo[-1].file_id, caption=admin_text, reply_markup=get_take_ticket_kb(user_id), parse_mode="HTML")
-        else:
-            await bot.send_message(chat_id=MOD_GROUP_ID, message_thread_id=MOD_THREAD_ID, text=admin_text, reply_markup=get_take_ticket_kb(user_id), parse_mode="HTML")
+        # Отправляем информационную шапку
+        await bot.send_message(chat_id=MOD_GROUP_ID, message_thread_id=MOD_THREAD_ID, text=header_text, parse_mode="HTML")
+        
+        # Копируем само сообщение (текст, фото, видео, голосовое, кружок) и вешаем кнопку "Взять тикет"
+        sent_msg = await message.copy_to(
+            chat_id=MOD_GROUP_ID, 
+            message_thread_id=MOD_THREAD_ID, 
+            reply_markup=get_take_ticket_kb(user_id)
+        )
+        
+        # Сохраняем ID сообщения для Проверки 3
+        await state.update_data(mod_id=None, ticket_msg_id=sent_msg.message_id)
     except Exception as e:
         logging.error(f"Ошибка отправки в группу модераторов: {e}")
+        await state.update_data(mod_id=None)
 
-@router.message(SupportStates.in_ticket, F.text | F.photo)
-async def process_additional_ticket_message(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    text_content = message.text or message.caption or "<Только фото>"
-    safe_text = html.escape(text_content)
-    
-    admin_text = (
-        f"💬 <b>Новое сообщение в тикет от</b> <code>{user_id}</code>:\n"
-        f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"{safe_text}"
-    )
-    
+@router.message(SupportStates.in_ticket)
+async def process_additional_ticket_message(message: Message, state: FSMContext, bot: Bot):
     player_data = await state.get_data()
     mod_id = player_data.get("mod_id")
-    
     target_id = mod_id if mod_id else MOD_GROUP_ID
     thread_id = None if mod_id else MOD_THREAD_ID
-    kb = get_admin_ticket_kb(user_id) if mod_id else get_take_ticket_kb(user_id)
     
     try:
-        if message.photo:
-            await bot.send_photo(chat_id=target_id, message_thread_id=thread_id, photo=message.photo[-1].file_id, caption=admin_text, reply_markup=kb, parse_mode="HTML")
-        else:
-            await bot.send_message(chat_id=target_id, message_thread_id=thread_id, text=admin_text, reply_markup=kb, parse_mode="HTML")
+        # Умно копируем любое сообщение напрямую модераторам
+        await message.copy_to(chat_id=target_id, message_thread_id=thread_id)
         await message.answer("📨 <i>Сообщение добавлено к обращению.</i>", parse_mode="HTML")
     except Exception:
         pass
@@ -455,16 +476,36 @@ async def mod_take_ticket(callback: CallbackQuery, bot: Bot):
 
 # --- Ответ администратора ---
 @router.callback_query(F.data.startswith("reply_to_"))
-async def admin_start_reply(callback: CallbackQuery, state: FSMContext):
+async def admin_start_reply(callback: CallbackQuery, state: FSMContext, bot: Bot):
     player_id = int(callback.data.split("_")[2])
+    
+    # Проверка 5: Открыт ли еще тикет со стороны игрока?
+    user_state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=player_id, user_id=player_id))
+    if await user_state.get_state() != SupportStates.in_ticket.state:
+        await callback.answer("⚠️ Поздно! Игрок уже закрыл или покинул этот тикет.", show_alert=True)
+        return
+
     await state.update_data(reply_to_user=player_id)
     await state.set_state(AdminStates.waiting_for_reply)
     
+    # Проверка 4: Красивая кнопка отмены
+    cancel_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить ответ", callback_data="cancel_admin_reply")]
+    ])
+    
     await callback.message.answer(
         f"✍️ Напиши ответ для пользователя <code>{player_id}</code>.\n"
-        f"<i>(Можно прикрепить фото. Для отмены напиши 'отмена')</i>", 
+        f"<i>(Можно прикрепить фото)</i>", 
+        reply_markup=cancel_kb,
         parse_mode="HTML"
     )
+    await callback.answer()
+
+# Обработчик кнопки "Отменить ответ" (Проверка 4)
+@router.callback_query(F.data == "cancel_admin_reply", AdminStates.waiting_for_reply)
+async def cancel_admin_reply(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("🔙 <i>Отправка ответа отменена.</i>", parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("close_ticket_"))
@@ -497,8 +538,8 @@ async def admin_close_ticket(callback: CallbackQuery, bot: Bot):
     except:
         pass
 
-@router.message(AdminStates.waiting_for_reply, F.text | F.photo)
-async def process_admin_reply(message: Message, state: FSMContext):
+@router.message(AdminStates.waiting_for_reply)
+async def process_admin_reply(message: Message, state: FSMContext, bot: Bot):
     if message.text and message.text.lower() == 'отмена':
         await state.clear()
         await message.answer("🔙 <i>Отправка ответа отменена.</i>", parse_mode="HTML")
@@ -507,19 +548,18 @@ async def process_admin_reply(message: Message, state: FSMContext):
     data = await state.get_data()
     player_id = data.get("reply_to_user")
     
-    text_content = message.text or message.caption or ""
-    safe_text = html.escape(text_content)
-    
-    reply_text = (
-        f"👨‍💻 <b>Ответ от администрации:</b>\n\n"
-        f"{safe_text}"
-    )
+    # Проверка 5 (доп): Открыт ли еще тикет прямо перед отправкой?
+    user_state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=player_id, user_id=player_id))
+    if await user_state.get_state() != SupportStates.in_ticket.state:
+        await message.answer("⚠️ <b>Ошибка:</b> Игрок уже закрыл этот тикет. Ваш ответ не доставлен.", parse_mode="HTML")
+        await state.clear()
+        return
     
     try:
-        if message.photo:
-            await bot.send_photo(chat_id=player_id, photo=message.photo[-1].file_id, caption=reply_text, parse_mode="HTML")
-        else:
-            await bot.send_message(chat_id=player_id, text=reply_text, parse_mode="HTML")
+        # Предупреждаем игрока, что это ответ от админа
+        await bot.send_message(chat_id=player_id, text="👨‍💻 <b>Ответ от администрации:</b>", parse_mode="HTML")
+        # Копируем само сообщение админа (текст, фото, кружочек, видео, голосовое)
+        await message.copy_to(chat_id=player_id)
         await message.answer("✅ <b>Ответ отправлен!</b>\n<i>(Тикет остается открытым, игрок может ответить)</i>", parse_mode="HTML")
     except Exception as e:
         await message.answer(f"❌ Ошибка отправки.\n{e}")
@@ -534,13 +574,13 @@ async def cmd_broadcast(message: Message, state: FSMContext):
     
     await message.answer(
         "📣 <b>Настройка рассылки</b>\n\n"
-        "Отправь текст (или фото с текстом), который получат <b>все</b> пользователи бота.\n"
+        "Отправь сообщение (текст, фото, видео, голосовое), которое получат <b>все</b> пользователи бота.\n"
         "<i>(Для отмены напиши <code>отмена</code>)</i>",
         parse_mode="HTML"
     )
     await state.set_state(AdminStates.waiting_for_broadcast)
 
-@router.message(AdminStates.waiting_for_broadcast, F.text | F.photo)
+@router.message(AdminStates.waiting_for_broadcast)
 async def process_broadcast(message: Message, state: FSMContext):
     if message.text and message.text.lower() == 'отмена':
         await state.clear()
@@ -558,15 +598,10 @@ async def process_broadcast(message: Message, state: FSMContext):
     success_count = 0
     error_count = 0
     
-    text_content = message.text or message.caption or ""
-    safe_text = html.escape(text_content)
-    
     for user_id in users:
         try:
-            if message.photo:
-                await bot.send_photo(chat_id=user_id, photo=message.photo[-1].file_id, caption=safe_text, parse_mode="HTML")
-            else:
-                await bot.send_message(chat_id=user_id, text=safe_text, parse_mode="HTML")
+            # Копируем любое сообщение целиком
+            await message.copy_to(chat_id=user_id)
             success_count += 1
             await asyncio.sleep(0.05)
         except Exception:
