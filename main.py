@@ -184,7 +184,6 @@ async def server_status(message: Message):
         text = (
             f"🟢 <b>Misacraft работает стабильно!</b>\n\n"
             f"👥 Игроков онлайн: <code>{status.players.online}/{status.players.max}</code>\n"
-            f"📶 Текущий пинг: <code>{round(status.latency)} ms</code>\n\n"
             f"IP: <code>{SERVER_IP}</code>\n"
             f"🔥 <i>Залетай, ждем тебя!</i>"
         )
@@ -467,7 +466,7 @@ async def cmd_broadcast(message: Message, state: FSMContext):
     
     await message.answer(
         "📣 <b>Настройка рассылки</b>\n\n"
-        "Отправь текст (или фото с подписью), который получат <b>все</b> пользователи бота.\n"
+        "Отправь текст (или фото с текстом), который получат <b>все</b> пользователи бота.\n"
         "<i>(Для отмены напиши <code>отмена</code>)</i>",
         parse_mode="HTML"
     )
