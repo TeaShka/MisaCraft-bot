@@ -329,34 +329,34 @@ async def mod_take_ticket(callback: CallbackQuery, bot: Bot):
     mod_username = f"@{callback.from_user.username}" if callback.from_user.username else callback.from_user.first_name
     safe_mod_username = html.escape(mod_username)
     
+    # Получаем доступ к состоянию игрока
     player_state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=player_id, user_id=player_id))
+    
+    # ПРОВЕРКА: Открыт ли еще тикет со стороны игрока?
+    current_state = await player_state.get_state()
+    if current_state != SupportStates.in_ticket.state:
+        await callback.answer("⚠️ Игрок уже закрыл или отменил это обращение!", show_alert=True)
+        # Убираем кнопку из чата, так как тикет уже неактуален
+        original_text = callback.message.text or callback.message.caption or "Новое обращение"
+        safe_original = html.escape(original_text)
+        edited_text = f"{safe_original}\n\n❌ <i>Тикет был закрыт игроком.</i>"
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(caption=edited_text, reply_markup=None, parse_mode="HTML")
+            else:
+                await callback.message.edit_text(text=edited_text, reply_markup=None, parse_mode="HTML")
+        except Exception:
+            pass
+        return
+
     player_data = await player_state.get_data()
     
+    # Проверяем, не взял ли тикет кто-то другой
     if player_data.get("mod_id"):
         await callback.answer("⚠️ Этот тикет уже взял другой администратор!", show_alert=True)
         return
 
-    try:
-        await bot.send_message(
-            chat_id=mod_id,
-            text=f"✅ <b>Ты взял в работу обращение от ID <code>{player_id}</code>!</b>\nТеперь все новые сообщения от него будут приходить сюда (в ЛС).",
-            reply_markup=get_admin_ticket_kb(player_id),
-            parse_mode="HTML"
-        )
-    except Exception:
-        await callback.answer("❌ Ошибка! Бот не может написать тебе в ЛС. Сначала перейди в бота и нажми /start !", show_alert=True)
-        return
-
-    await player_state.update_data(mod_id=mod_id)
-    
-    original_text = callback.message.text or callback.message.caption or "Новое обращение"
-    safe_original = html.escape(original_text)
-    edited_text = f"{safe_original}\n\n✅ <i>Взял в работу:</i> {safe_mod_username}"
-    
-    try:
-        if callback.message.photo:
-            await callback.message.edit_caption(caption=edited_text, reply_markup=None, parse_mode="HTML")
-        else:
+    # Пробуем написать модератору в ЛС
             await callback.message.edit_text(text=edited_text, reply_markup=None, parse_mode="HTML")
     except Exception:
         pass
