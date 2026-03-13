@@ -29,6 +29,10 @@ MOD_GROUP_ID = int(os.getenv("MOD_GROUP_ID", -1000000000000))
 _thread_id = os.getenv("MOD_THREAD_ID", "")
 MOD_THREAD_ID = int(_thread_id) if _thread_id and _thread_id.lower() != "none" else None
 
+# Настройки обязательной подписки
+CHANNEL_ID = os.getenv("CHANNEL_ID", "") # ID канала, например -100123456789 (оставь пустым, если проверка не нужна)
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/Misacraft")
+
 # Информация о сервере
 SERVER_IP = "play.misacraft.online"
 SERVER_VERSION = "1.21.10"
@@ -114,6 +118,30 @@ def get_admin_ticket_kb(user_id: int) -> InlineKeyboardMarkup:
         ]
     )
 
+# Кнопка для подписки
+def get_subscribe_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📢 Подписаться на канал", url=CHANNEL_LINK)],
+            [InlineKeyboardButton(text="🔄 Я подписался!", callback_data="check_sub")]
+        ]
+    )
+
+# Функция проверки подписки
+async def is_subscribed(user_id: int, bot: Bot) -> bool:
+    if not CHANNEL_ID:
+        return True # Если канал не настроен, пускаем всех
+    if user_id == MAIN_ADMIN_ID:
+        return True # Главного админа пускаем всегда
+    try:
+        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        if member.status in ['left', 'kicked']:
+            return False
+        return True
+    except Exception as e:
+        logging.error(f"Ошибка проверки подписки: {e}")
+        return True # Если бот не админ в канале, пускаем, чтобы не сломать бота
+
 # ==========================================
 # 🚦 СОСТОЯНИЯ (FSM)
 # ==========================================
@@ -175,9 +203,26 @@ async def faq_connect_answer(callback: CallbackQuery):
     await callback.message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
+@router.callback_query(F.data == "check_sub")
+async def check_sub_callback(callback: CallbackQuery, bot: Bot):
+    if await is_subscribed(callback.from_user.id, bot):
+        await callback.message.delete()
+        await callback.message.answer("✅ <b>Спасибо за подписку!</b> Теперь тебе доступны все функции бота.", reply_markup=main_kb, parse_mode="HTML")
+    else:
+        await callback.answer("❌ Ты еще не подписался на канал!", show_alert=True)
+
 @router.message(F.text == "🌐 Статус сервера")
-async def server_status(message: Message):
-    wait_msg = await message.answer("🔄 <i>Проверяю сервер...</i>", parse_mode="HTML")
+async def server_status(message: Message, bot: Bot):
+    if not await is_subscribed(message.from_user.id, bot):
+        await message.answer(
+            "🛑 <b>Доступ закрыт!</b>\n\n"
+            "Чтобы проверять статус сервера, пожалуйста, подпишись на наш Telegram-канал новостей.",
+            reply_markup=get_subscribe_kb(),
+            parse_mode="HTML"
+        )
+        return
+
+    wait_msg = await message.answer("🔄 <i>Опрашиваю сервер...</i>", parse_mode="HTML")
     try:
         server = await JavaServer.async_lookup(SERVER_IP)
         status = await server.async_status()
@@ -185,7 +230,7 @@ async def server_status(message: Message):
             f"🟢 <b>Misacraft работает стабильно!</b>\n\n"
             f"👥 Игроков онлайн: <code>{status.players.online}/{status.players.max}</code>\n"
             f"IP: <code>{SERVER_IP}</code>\n"
-            f"🔥 <i>Залетай, ждем тебя!</i>"
+            f"🔥 <i>Заходи, ждем тебя!</i>"
         )
     except Exception as e:
         text = (
@@ -198,12 +243,21 @@ async def server_status(message: Message):
 
 # --- Раздел Поддержки (Тикеты) ---
 @router.message(F.text == "🆘 Написать в поддержку")
-async def ask_support(message: Message, state: FSMContext):
+async def ask_support(message: Message, state: FSMContext, bot: Bot):
+    if not await is_subscribed(message.from_user.id, bot):
+        await message.answer(
+            "🛑 <b>Доступ закрыт!</b>\n\n"
+            "Чтобы обращаться в поддержку, пожалуйста, подпишись на наш Telegram-канал новостей.",
+            reply_markup=get_subscribe_kb(),
+            parse_mode="HTML"
+        )
+        return
+
     user_id = message.from_user.id
     current_time = time.time()
     
-    # Проверка антиспама: если игрок уже есть в базе задержек
-    if user_id in user_cooldowns:
+    # Проверка антиспама: главный админ игнорирует задержку
+    if user_id != MAIN_ADMIN_ID and user_id in user_cooldowns:
         time_passed = current_time - user_cooldowns[user_id]
         if time_passed < TICKET_COOLDOWN:
             minutes_left = int((TICKET_COOLDOWN - time_passed) // 60)
