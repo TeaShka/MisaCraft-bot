@@ -357,6 +357,29 @@ async def mod_take_ticket(callback: CallbackQuery, bot: Bot):
         return
 
     # Пробуем написать модератору в ЛС
+    try:
+        await bot.send_message(
+            chat_id=mod_id,
+            text=f"✅ <b>Ты взял в работу обращение от ID <code>{player_id}</code>!</b>\nТеперь все новые сообщения от него будут приходить сюда (в ЛС).",
+            reply_markup=get_admin_ticket_kb(player_id),
+            parse_mode="HTML"
+        )
+    except Exception:
+        await callback.answer("❌ Ошибка! Бот не может написать тебе в ЛС. Сначала перейди в бота и нажми /start !", show_alert=True)
+        return
+
+    # Закрепляем модератора за игроком
+    await player_state.update_data(mod_id=mod_id)
+    
+    # Изменяем сообщение в группе модераторов
+    original_text = callback.message.text or callback.message.caption or "Новое обращение"
+    safe_original = html.escape(original_text)
+    edited_text = f"{safe_original}\n\n✅ <i>Взял в работу:</i> {safe_mod_username}"
+    
+    try:
+        if callback.message.photo:
+            await callback.message.edit_caption(caption=edited_text, reply_markup=None, parse_mode="HTML")
+        else:
             await callback.message.edit_text(text=edited_text, reply_markup=None, parse_mode="HTML")
     except Exception:
         pass
