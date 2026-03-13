@@ -43,7 +43,9 @@ USERS_FILE = "users.txt"
 
 # Настройки антиспама
 TICKET_COOLDOWN = 300  # Задержка между тикетами в секундах (300 = 5 минут)
+STATUS_COOLDOWN = 10   # Задержка для проверки статуса сервера (10 секунд)
 user_cooldowns = {}    # Словарь для хранения времени последнего тикета
+status_cooldowns = {}  # Словарь для хранения времени последней проверки статуса
 
 # Функция для сохранения ID пользователей
 def add_user(user_id: int):
@@ -211,6 +213,17 @@ async def check_sub_callback(callback: CallbackQuery, bot: Bot):
 
 @router.message(F.text == "🌐 Статус сервера")
 async def server_status(message: Message, bot: Bot):
+    user_id = message.from_user.id
+    current_time = time.time()
+    
+    # Проверка антиспама для статуса (главный админ игнорирует)
+    if user_id != MAIN_ADMIN_ID and user_id in status_cooldowns:
+        time_passed = current_time - status_cooldowns[user_id]
+        if time_passed < STATUS_COOLDOWN:
+            seconds_left = int(STATUS_COOLDOWN - time_passed)
+            await message.answer(f"⏳ Не так быстро! Подождите еще <b>{seconds_left} сек.</b>", parse_mode="HTML")
+            return
+
     if not await is_subscribed(message.from_user.id, bot):
         await message.answer(
             "🛑 <b>Доступ закрыт!</b>\n\n"
@@ -219,6 +232,9 @@ async def server_status(message: Message, bot: Bot):
             parse_mode="HTML"
         )
         return
+
+    # Записываем время проверки (активируем задержку)
+    status_cooldowns[user_id] = current_time
 
     wait_msg = await message.answer("🔄 <i>Опрашиваю сервер...</i>", parse_mode="HTML")
     try:
