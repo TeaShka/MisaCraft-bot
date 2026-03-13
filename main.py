@@ -75,9 +75,8 @@ router = Router()
 # ==========================================
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="ℹ️ Частые вопросы (FAQ)")],
-        [KeyboardButton(text="🆘 Написать в поддержку")],
-        [KeyboardButton(text="🌐 Статус сервера")]
+        [KeyboardButton(text="🌐 Статус сервера"), KeyboardButton(text="ℹ️ FAQ")],
+        [KeyboardButton(text="🆘 Написать в поддержку")]
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие..."
@@ -85,9 +84,8 @@ main_kb = ReplyKeyboardMarkup(
 
 in_ticket_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="ℹ️ Частые вопросы (FAQ)")],
-        [KeyboardButton(text="🔒 Закрыть обращение")],
-        [KeyboardButton(text="🌐 Статус сервера")]
+        [KeyboardButton(text="🌐 Статус сервера"), KeyboardButton(text="ℹ️ FAQ")],
+        [KeyboardButton(text="🔒 Закрыть обращение")]
     ],
     resize_keyboard=True,
     input_field_placeholder="Вы в диалоге с поддержкой..."
@@ -182,7 +180,7 @@ async def cmd_getid(message: Message):
     text += "\n<i>(Скопируйте нужные числа)</i>"
     await message.answer(text, parse_mode="HTML")
 
-@router.message(F.text == "ℹ️ Частые вопросы (FAQ)")
+@router.message(F.text == "ℹ️ FAQ")
 async def show_faq(message: Message):
     text = "📚 <b>База знаний Misacraft</b>\n\nВыбери интересующий раздел:"
     await message.answer(text, reply_markup=faq_kb, parse_mode="HTML")
