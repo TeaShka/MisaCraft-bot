@@ -12,6 +12,7 @@ from aiogram.filters import CommandStart, Command
 from mcstatus import JavaServer
 import os
 import html
+import time
 
 # ==========================================
 # ⚙️ НАСТРОЙКИ (БЕРУТСЯ ИЗ ХОСТИНГА ДЛЯ БЕЗОПАСНОСТИ)
@@ -35,6 +36,10 @@ DONATE_LINK = "https://site.misacraft.online/"
 RULES_LINK = "https://site.misacraft.online/"
 DISCORD_LINK = "https://discord.gg/69Jf7R4JFF"
 USERS_FILE = "users.txt"
+
+# Настройки антиспама
+TICKET_COOLDOWN = 300  # Задержка между тикетами в секундах (300 = 5 минут)
+user_cooldowns = {}    # Словарь для хранения времени последнего тикета
 
 # Функция для сохранения ID пользователей
 def add_user(user_id: int):
@@ -195,6 +200,29 @@ async def server_status(message: Message):
 # --- Раздел Поддержки (Тикеты) ---
 @router.message(F.text == "🆘 Написать в поддержку")
 async def ask_support(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    current_time = time.time()
+    
+    # Проверка антиспама: если игрок уже есть в базе задержек
+    if user_id in user_cooldowns:
+        time_passed = current_time - user_cooldowns[user_id]
+        if time_passed < TICKET_COOLDOWN:
+            minutes_left = int((TICKET_COOLDOWN - time_passed) // 60)
+            seconds_left = int((TICKET_COOLDOWN - time_passed) % 60)
+            
+            # Формируем красивый текст со временем
+            time_str = ""
+            if minutes_left > 0:
+                time_str += f"{minutes_left} мин. "
+            time_str += f"{seconds_left} сек."
+            
+            await message.answer(
+                f"⏳ <b>Антиспам-защита:</b> Вы создаете обращения слишком часто.\n\n"
+                f"Подождите еще {time_str}, прежде чем открыть новый тикет.",
+                parse_mode="HTML"
+            )
+            return
+
     await message.answer(
         "📝 <b>Создание обращения</b>\n\n"
         "Опиши свою проблему или задай вопрос максимально подробно. Если нужно - прикрепи скриншот (отправляй фото сразу с текстом).\n\n"
@@ -232,6 +260,9 @@ async def close_ticket_user(message: Message, state: FSMContext, bot: Bot):
 async def process_support_question(message: Message, state: FSMContext):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Без юзернейма"
+    
+    # Фиксируем время создания тикета (активируем задержку для игрока)
+    user_cooldowns[user_id] = time.time()
     
     await message.answer(
         "✅ <b>Обращение успешно создано!</b>\n\n"
