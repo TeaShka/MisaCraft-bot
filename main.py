@@ -364,7 +364,7 @@ async def process_support_question(message: Message, state: FSMContext, bot: Bot
     await message.answer(
         "✅ <b>Обращение успешно создано!</b>\n\n"
         "Администрация уже получила твое сообщение. Обычно мы отвечаем в течение дня.\n"
-        "Ты можешь присылать сюда детали, скриншоты, голосовые или видео, пока диалог открыт.",
+        "<i>Пожалуйста, дождись ответа модератора, прежде чем отправлять дополнительные материалы.</i>",
         reply_markup=in_ticket_kb,
         parse_mode="HTML"
     )
@@ -399,13 +399,23 @@ async def process_support_question(message: Message, state: FSMContext, bot: Bot
 async def process_additional_ticket_message(message: Message, state: FSMContext, bot: Bot):
     player_data = await state.get_data()
     mod_id = player_data.get("mod_id")
-    target_id = mod_id if mod_id else MOD_GROUP_ID
-    thread_id = None if mod_id else MOD_THREAD_ID
+    
+    # Строгий режим: запрещаем спамить до того, как модератор возьмет тикет
+    if not mod_id:
+        await message.answer(
+            "⏳ <b>Ваше обращение еще в очереди.</b>\n\n"
+            "Пожалуйста, дождитесь, пока модератор подключится к диалогу, прежде чем присылать дополнительные файлы или сообщения.",
+            parse_mode="HTML"
+        )
+        return
+        
+    target_id = mod_id
+    thread_id = None # Отправляем строго в ЛС модератору
     
     try:
-        # Умно копируем любое сообщение напрямую модераторам
+        # Умно копируем любое сообщение напрямую модератору
         await message.copy_to(chat_id=target_id, message_thread_id=thread_id)
-        await message.answer("📨 <i>Сообщение добавлено к обращению.</i>", parse_mode="HTML")
+        await message.answer("📨 <i>Сообщение доставлено модератору.</i>", parse_mode="HTML")
     except Exception:
         pass
 
